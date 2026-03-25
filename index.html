@@ -152,8 +152,67 @@
     <!-- <div id="time"></div> -->
 
   </div>
+    <script>
+    const API_URL = "http://16.170.185.147:8000/data";
+  
+    async function loadData() {
+      try {
+        const res = await fetch(API_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("API error");
+  
+        const data = await res.json();
+        const s = data.stock;
+  
+        // SYMBOL
+        const symbolEl = document.getElementById("symbol");
+        symbolEl.innerText = s.symbol;
+        symbolEl.style.color = "#E6A64B";
+  
+        // PRICE
+        document.getElementById("price").innerText =
+          "₹" + Number(s.price).toFixed(2);
+  
+        // CHANGE
+        const changeEl = document.getElementById("change");
+        const change = Number(s.change);
+        const changePercent = Number(s.change_percent);
+  
+        changeEl.innerText =
+          `${change >= 0 ? "+" : ""}${change.toFixed(2)} (${changePercent.toFixed(2)}%)`;
+  
+        changeEl.className = change >= 0 ? "up" : "down";
+  
+        // STATS (formatted properly)
+        document.getElementById("prev").innerText = Number(s.prev_close).toFixed(2);
+        document.getElementById("open").innerText = Number(s.open).toFixed(2);
+        document.getElementById("high").innerText = Number(s.high).toFixed(2);
+        document.getElementById("low").innerText = Number(s.low).toFixed(2);
+        document.getElementById("close").innerText = Number(s.price).toFixed(2);
+        document.getElementById("vwap").innerText = Number(s.vwap).toFixed(2);
+  
+        // OPTIONAL INDEX DATA (if you enable in UI)
+        // document.getElementById("nifty").innerText =
+        //   data.index?.nifty ? data.index.nifty.toFixed(2) : "N/A";
+  
+        // document.getElementById("sensex").innerText =
+        //   data.index?.sensex ? data.index.sensex.toFixed(2) : "N/A";
+  
+        // OPTIONAL TIME
+        // document.getElementById("time").innerText = data.timestamp;
+  
+      } catch (err) {
+        console.error(err);
+        const symbolEl = document.getElementById("symbol");
+        symbolEl.innerText = "WAITING FOR DATA…";
+        symbolEl.style.color = "#E6A64B";
+      }
+    }
+  
+    setInterval(loadData, 3000);
+    loadData();
+  </script>
 
-  <script>
+  <!-- <script>
     const API_URL = "http://16.170.185.147:8000/data";
 
     async function loadData() {
@@ -208,7 +267,7 @@
 
     setInterval(loadData, 3000);
     loadData();
-  </script>
+  </script> -->
 
 </body>
 </html>
