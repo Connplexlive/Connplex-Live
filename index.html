@@ -1,273 +1,278 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Connplex Stock LED</title>
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+from datetime import datetime
+import yfinance as yf
 
-  <style>
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
+app = FastAPI()
+
+# =========================================
+# CONFIG
+# =========================================
+
+SYMBOL = "CONNPLEX"
+
+DISPLAY_NAME = "CONNPLEX CINEMAS LTD - SM.NS"
+
+# =========================================
+# CORS
+# =========================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# =========================================
+# SESSION
+# =========================================
+
+session = requests.Session()
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.google.com/",
+    "Connection": "keep-alive"
+}
+
+# =========================================
+# ROOT
+# =========================================
+
+@app.get("/")
+def root():
+    return {"status": "API running"}
+
+# =========================================
+# NSE FETCH
+# =========================================
+
+def fetch_stock_nse(symbol):
+    try:
+
+        # Initialize NSE session
+        session.get(
+            "https://www.nseindia.com",
+            headers=HEADERS,
+            timeout=10
+        )
+
+        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
+
+        response = session.get(
+            url,
+            headers=HEADERS,
+            timeout=10
+        )
+
+        print("NSE STATUS:", response.status_code)
+
+        if response.status_code != 200:
+            print("NSE FAILED:", response.text[:300])
+            return None
+
+        if not response.text.strip():
+            print("NSE EMPTY RESPONSE")
+            return None
+
+        data = response.json()
+
+        if "priceInfo" not in data:
+            print("NSE INVALID DATA")
+            return None
+
+        price_data = data["priceInfo"]
+
+        high = price_data.get("intraDayHighLow", {}).get("max")
+        low = price_data.get("intraDayHighLow", {}).get("min")
+        price = price_data.get("lastPrice")
+
+        vwap = data.get("securityWiseDP", {}).get("vwap")
+
+        # Manual VWAP fallback
+        if not vwap and high and low and price:
+            vwap = round((high + low + price) / 3, 2)
+
+        return {
+            "symbol": DISPLAY_NAME,
+            "price": price or 0,
+            "open": price_data.get("open") or 0,
+            "high": high or 0,
+            "low": low or 0,
+            "prev_close": price_data.get("previousClose") or 0,
+            "change": price_data.get("change") or 0,
+            "change_percent": round(
+                float(price_data.get("pChange", 0)),
+                2
+            ),
+            "vwap": vwap or 0,
+        }
+
+    except Exception as e:
+        print("NSE ERROR:", str(e))
+        return None
+
+# =========================================
+# YAHOO FINANCE FALLBACK
+# =========================================
+
+def fetch_stock_yfinance(symbol):
+    try:
+
+        ticker = yf.Ticker(symbol + ".NS")
+
+        # Use history instead of .info
+        hist = ticker.history(period="2d")
+
+        if hist.empty:
+            print("YFINANCE EMPTY")
+            return None
+
+        latest = hist.iloc[-1]
+
+        price = round(float(latest["Close"]), 2)
+        open_price = round(float(latest["Open"]), 2)
+        high = round(float(latest["High"]), 2)
+        low = round(float(latest["Low"]), 2)
+
+        prev_close = price
+        change = 0
+        change_percent = 0
+
+        if len(hist) >= 2:
+            prev_close = round(float(hist.iloc[-2]["Close"]), 2)
+
+            change = round(price - prev_close, 2)
+
+            if prev_close != 0:
+                change_percent = round(
+                    (change / prev_close) * 100,
+                    2
+                )
+
+        vwap = round((high + low + price) / 3, 2)
+
+        return {
+            "symbol": DISPLAY_NAME,
+            "price": price,
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "prev_close": prev_close,
+            "change": change,
+            "change_percent": change_percent,
+            "vwap": vwap,
+        }
+
+    except Exception as e:
+        print("YFINANCE ERROR:", str(e))
+        return None
+
+# =========================================
+# STOCK WRAPPER
+# =========================================
+
+def fetch_stock(symbol):
+
+    # Try NSE first
+    data = fetch_stock_nse(symbol)
+
+    if data:
+        print("NSE SUCCESS")
+        return data
+
+    # Fallback to Yahoo
+    data = fetch_stock_yfinance(symbol)
+
+    if data:
+        print("YFINANCE SUCCESS")
+        return data
+
+    # Final safe fallback
+    return {
+        "symbol": DISPLAY_NAME,
+        "price": 0,
+        "open": 0,
+        "high": 0,
+        "low": 0,
+        "prev_close": 0,
+        "change": 0,
+        "change_percent": 0,
+        "vwap": 0,
+        "error": "Data temporarily unavailable"
     }
 
-    * {
-      font-weight: 900;
-      -webkit-font-smoothing: none;
-      text-rendering: geometricPrecision;
+# =========================================
+# INDEX DATA
+# =========================================
+
+def fetch_index_data():
+    try:
+
+        nifty = None
+        sensex = None
+
+        try:
+            nifty_hist = yf.Ticker("^NSEI").history(period="1d")
+
+            if not nifty_hist.empty:
+                nifty = round(
+                    float(nifty_hist.iloc[-1]["Close"]),
+                    2
+                )
+
+        except Exception as e:
+            print("NIFTY ERROR:", str(e))
+
+        try:
+            sensex_hist = yf.Ticker("^BSESN").history(period="1d")
+
+            if not sensex_hist.empty:
+                sensex = round(
+                    float(sensex_hist.iloc[-1]["Close"]),
+                    2
+                )
+
+        except Exception as e:
+            print("SENSEX ERROR:", str(e))
+
+        return {
+            "nifty": nifty,
+            "sensex": sensex
+        }
+
+    except Exception as e:
+        print("INDEX ERROR:", str(e))
+
+        return {
+            "nifty": None,
+            "sensex": None
+        }
+
+# =========================================
+# MAIN API
+# =========================================
+
+@app.get("/data")
+def get_stock_data():
+
+    stock_data = fetch_stock(SYMBOL)
+
+    index_data = fetch_index_data()
+
+    return {
+        "stock": stock_data,
+        "index": index_data,
+        "timestamp": datetime.now().strftime(
+            "%d-%b-%Y %H:%M:%S IST"
+        )
     }
-
-    body {
-      background: black;
-      font-family: "Consolas", "Courier New", monospace;
-      text-align: center;
-      color: white;
-    }
-
-    .container {
-      padding-top: 4vh;
-    }
-
-    #symbol {
-      font-size: 9vh;
-      letter-spacing: 0.4vh;
-      margin-bottom: 2vh;
-      color: #E6A64B;
-
-      
-      font-weight: 900;
-      font-size: 3.2em;
-
-      /* EXTRA BOLD LOOK */
-      -webkit-text-stroke: 0.20vh #E6A64B;
-      text-shadow: 0 0 1.2vh rgba(230, 166, 75, 0.35);
-    }
-
-
-    /* Brand row: logo + company name */
-    .brand {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 1.5vh;
-      margin-bottom: 1vh;
-    }
-
-    #logo {
-      height: 9vh;
-      width: auto;
-      object-fit: contain;
-      -webkit-user-drag: none;
-      user-select: none;
-    }
-
-    /* Responsive tweaks */
-    @media (max-width: 600px) {
-      #logo { height: 6vh; }
-      #symbol { font-size: 6vh; }
-      #price { font-size: 12vh; }
-      #change { font-size: 5vh; }
-    }
-
-    /* Price row */
-    .price-row {
-      display: flex;
-      justify-content: center;
-      align-items: baseline;
-      gap: 3vw;
-    }
-
-    #price {
-      font-size: 18vh;
-      color: #00ff66;
-    }
-
-    #change {
-      font-size: 9vh;
-    }
-
-    .up { color: #00ff66; }
-    .down { color: #ff3333; }
-
-    /* Stats row */
-    .stats {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 2vw;
-      margin-top: 4vh;
-      padding: 0 5%;
-      flex-wrap: nowrap;
-    }
-
-    .stat {
-      flex: 1;
-      text-align: center;
-    }
-
-    .stat-label {
-      font-size: 7.5vh;
-      color: #888;
-      margin-bottom: 0.5vh;
-    }
-
-    .stat-value {
-      font-size: 9vh;
-      color: white;
-    }
-
-    #time {
-      margin-top: 3vh;
-      font-size: 4vh;
-      color: #777;
-    }
-  </style>
-</head>
-
-<body>
-
-  <div class="container">
-
-    <div class="brand">
-      <!-- <img id="logo" src="connplex_logo.jpg" alt="Connplex logo" /> -->
-      <div id="symbol">LOADING…</div>
-    </div>
-
-    <div class="price-row">
-      <div id="price">₹0.00</div>
-      <div id="change">--</div>
-    </div>
-
-    <div class="stats">
-      <div class="stat"><div class="stat-label">PRE</div><div id="prev" class="stat-value">--</div></div>
-      <div class="stat"><div class="stat-label">OPEN</div><div id="open" class="stat-value">--</div></div>
-      <div class="stat"><div class="stat-label">HIGH</div><div id="high" class="stat-value">--</div></div>
-      <div class="stat"><div class="stat-label">LOW</div><div id="low" class="stat-value">--</div></div>
-      <div class="stat"><div class="stat-label">CLOSE</div><div id="close" class="stat-value">--</div></div>
-      <div class="stat"><div class="stat-label">VWAP</div><div id="vwap" class="stat-value">--</div></div>
-      <!-- <div class="stat"><div class="stat-label">NIFTY 50</div><div id="nifty" class="stat-value">--</div></div>
-      <div class="stat"><div class="stat-label">SENSEX</div><div id="sensex" class="stat-value">--</div></div> -->
-    </div>
-
-    <!-- <div id="time"></div> -->
-
-  </div>
-    <script>
-    const API_URL = "https://d39t7ev1pbpw3a.cloudfront.net/data";
-  
-    async function loadData() {
-      try {
-        const res = await fetch(API_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("API error");
-  
-        const data = await res.json();
-        const s = data.stock;
-  
-        // SYMBOL
-        const symbolEl = document.getElementById("symbol");
-        symbolEl.innerText = s.symbol;
-        symbolEl.style.color = "#E6A64B";
-  
-        // PRICE
-        document.getElementById("price").innerText =
-          "₹" + Number(s.price).toFixed(2);
-  
-        // CHANGE
-        const changeEl = document.getElementById("change");
-        const change = Number(s.change);
-        const changePercent = Number(s.change_percent);
-  
-        changeEl.innerText =
-          `${change >= 0 ? "+" : ""}${change.toFixed(2)} (${changePercent.toFixed(2)}%)`;
-  
-        changeEl.className = change >= 0 ? "up" : "down";
-  
-        // STATS (formatted properly)
-        document.getElementById("prev").innerText = Number(s.prev_close).toFixed(2);
-        document.getElementById("open").innerText = Number(s.open).toFixed(2);
-        document.getElementById("high").innerText = Number(s.high).toFixed(2);
-        document.getElementById("low").innerText = Number(s.low).toFixed(2);
-        document.getElementById("close").innerText = Number(s.price).toFixed(2);
-        document.getElementById("vwap").innerText = Number(s.vwap).toFixed(2);
-  
-        // OPTIONAL INDEX DATA (if you enable in UI)
-        // document.getElementById("nifty").innerText =
-        //   data.index?.nifty ? data.index.nifty.toFixed(2) : "N/A";
-  
-        // document.getElementById("sensex").innerText =
-        //   data.index?.sensex ? data.index.sensex.toFixed(2) : "N/A";
-  
-        // OPTIONAL TIME
-        // document.getElementById("time").innerText = data.timestamp;
-  
-      } catch (err) {
-        console.error(err);
-        const symbolEl = document.getElementById("symbol");
-        symbolEl.innerText = "WAITING FOR DATA…";
-        symbolEl.style.color = "#E6A64B";
-      }
-    }
-  
-    setInterval(loadData, 3000);
-    loadData();
-  </script>
-
-  <!-- <script>
-    const API_URL = "http://16.170.185.147:8000/data";
-
-    async function loadData() {
-      try {
-        const res = await fetch(API_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("API error");
-
-        const data = await res.json();
-        const s = data.stock;
-
-        const symbolEl = document.getElementById("symbol");
-        symbolEl.innerText = s.symbol;
-        symbolEl.style.color = "#E6A64B"; // 🔒 force gold always
-
-        document.getElementById("price").innerText =
-          "₹" + s.price.toFixed(2);
-
-        const changeEl = document.getElementById("change");
-        changeEl.innerText = `${s.change.toFixed(2)} (${s.change_percent}%)`;
-        changeEl.className = s.change >= 0 ? "up" : "down";
-
-        document.getElementById("prev").innerText = s.prev_close;
-        document.getElementById("open").innerText = s.open;
-        document.getElementById("high").innerText = s.high;
-        document.getElementById("low").innerText = s.low;
-        document.getElementById("close").innerText = s.price;
-        document.getElementById("vwap").innerText = s.vwap;
-
-        // document.getElementById("nifty").innerText =
-        //   data.index.nifty ? data.index.nifty.toFixed(2) : "N/A";
-
-        // document.getElementById("sensex").innerText =
-        //   data.index.sensex ? data.index.sensex.toFixed(2) : "N/A";
-
-        // document.getElementById("time").innerText =
-        //   new Date().toLocaleString("en-IN", {
-        //     day: "2-digit",
-        //     month: "short",
-        //     year: "numeric",
-        //     hour: "2-digit",
-        //     minute: "2-digit",
-        //     second: "2-digit"
-        //   }) + " IST";
-
-      } catch (err) {
-        console.error(err);
-        const symbolEl = document.getElementById("symbol");
-        symbolEl.innerText = "WAITING FOR DATA…";
-        symbolEl.style.color = "#E6A64B";
-      }
-    }
-
-    setInterval(loadData, 3000);
-    loadData();
-  </script> -->
-
-</body>
-</html>
