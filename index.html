@@ -154,52 +154,8 @@
   </div>
     <script>
     const API_URL = "https://d39t7ev1pbpw3a.cloudfront.net/data";
-    let intervalId = null;
-    let resumeTimeoutId = null;
-  
-    function getIstNow() {
-      const now = new Date();
-      const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-      return new Date(utc + 5.5 * 60 * 60000);
-    }
-  
-    function isMarketOpen(date) {
-      const hours = date.getHours();
-      const minutes = date.getMinutes();
-      const open = hours > 9 || (hours === 9 && minutes >= 15);
-      const close = hours < 15 || (hours === 15 && minutes <= 15);
-      return open && close;
-    }
-  
-    function getNextMarketOpen(date) {
-      const nextOpen = new Date(date);
-      nextOpen.setHours(9, 15, 0, 0);
-      if (date >= nextOpen) {
-        nextOpen.setDate(nextOpen.getDate() + 1);
-      }
-      return nextOpen;
-    }
-  
-    function setClosedState() {
-      const symbolEl = document.getElementById("symbol");
-      symbolEl.innerText = "MARKET CLOSED";
-      symbolEl.style.color = "#888";
-      document.getElementById("price").innerText = "₹0.00";
-      document.getElementById("change").innerText = "--";
-      document.getElementById("prev").innerText = "--";
-      document.getElementById("open").innerText = "--";
-      document.getElementById("high").innerText = "--";
-      document.getElementById("low").innerText = "--";
-      document.getElementById("close").innerText = "--";
-      document.getElementById("vwap").innerText = "--";
-    }
   
     async function loadData() {
-      const now = getIstNow();
-      if (!isMarketOpen(now)) {
-        return;
-      }
-  
       try {
         const res = await fetch(API_URL, { cache: "no-store" });
         if (!res.ok) throw new Error("API error");
@@ -207,27 +163,43 @@
         const data = await res.json();
         const s = data.stock;
   
+        // SYMBOL
         const symbolEl = document.getElementById("symbol");
         symbolEl.innerText = s.symbol;
         symbolEl.style.color = "#E6A64B";
   
+        // PRICE
         document.getElementById("price").innerText =
           "₹" + Number(s.price).toFixed(2);
   
+        // CHANGE
         const changeEl = document.getElementById("change");
         const change = Number(s.change);
         const changePercent = Number(s.change_percent);
   
         changeEl.innerText =
           `${change >= 0 ? "+" : ""}${change.toFixed(2)} (${changePercent.toFixed(2)}%)`;
+  
         changeEl.className = change >= 0 ? "up" : "down";
   
+        // STATS (formatted properly)
         document.getElementById("prev").innerText = Number(s.prev_close).toFixed(2);
         document.getElementById("open").innerText = Number(s.open).toFixed(2);
         document.getElementById("high").innerText = Number(s.high).toFixed(2);
         document.getElementById("low").innerText = Number(s.low).toFixed(2);
         document.getElementById("close").innerText = Number(s.price).toFixed(2);
         document.getElementById("vwap").innerText = Number(s.vwap).toFixed(2);
+  
+        // OPTIONAL INDEX DATA (if you enable in UI)
+        // document.getElementById("nifty").innerText =
+        //   data.index?.nifty ? data.index.nifty.toFixed(2) : "N/A";
+  
+        // document.getElementById("sensex").innerText =
+        //   data.index?.sensex ? data.index.sensex.toFixed(2) : "N/A";
+  
+        // OPTIONAL TIME
+        // document.getElementById("time").innerText = data.timestamp;
+  
       } catch (err) {
         console.error(err);
         const symbolEl = document.getElementById("symbol");
@@ -236,39 +208,8 @@
       }
     }
   
-    function stopPolling() {
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-      setClosedState();
-      const nextOpen = getNextMarketOpen(getIstNow());
-      const waitMs = nextOpen.getTime() - getIstNow().getTime();
-      resumeTimeoutId = setTimeout(startPolling, waitMs);
-    }
-  
-    function startPolling() {
-      const now = getIstNow();
-      if (!isMarketOpen(now)) {
-        stopPolling();
-        return;
-      }
-  
-      loadData();
-      if (intervalId === null) {
-        intervalId = setInterval(loadData, 3000);
-      }
-  
-      const closeTime = new Date(now);
-      closeTime.setHours(15, 15, 0, 0);
-      const msUntilClose = closeTime.getTime() - now.getTime();
-      if (resumeTimeoutId !== null) {
-        clearTimeout(resumeTimeoutId);
-      }
-      resumeTimeoutId = setTimeout(stopPolling, msUntilClose);
-    }
-  
-    startPolling();
+    setInterval(loadData, 3000);
+    loadData();
   </script>
 
   <!-- <script>
